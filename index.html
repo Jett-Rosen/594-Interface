@@ -42,6 +42,10 @@ const LABELS = [
   [3, "anger"], [4, "fear"], [5, "surprise"],
 ];
 
+// How many tweets each participant labels, drawn at random from the full set so
+// that no two participants see the same selection.
+const SESSION_SIZE = 5;
+
 const INSTRUCTIONS = `Do your best to identify the emotion expressed in the tweet
   and click the corresponding button, which records your label and shows you the next
   tweet. If you want to go back and change an earlier label, use <b>Previous</b> and
@@ -86,12 +90,14 @@ function start() {
   error = "";
   labels = {};
   pos = 0;
-  // Fresh random order every time the interface is used.
+  // Shuffle the whole set, then take the first SESSION_SIZE. Reshuffling on every
+  // session means each participant gets a different random selection.
   order = TWEETS.map((_, i) => i);
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
+  order = order.slice(0, SESSION_SIZE);
   render();
 }
 
@@ -124,7 +130,8 @@ function render() {
       <p>This is an interface for labeling the Emotion dataset, which involves classifying
       twitter messages (tweets) into basic emotions: anger, fear, joy, love, sadness, and surprise.</p>
       <p>First, you will enter an annotator ID. This will be used to track which messages
-      you have classified. Then, you will be presented with the tweets, one at a time. Do your best to identify
+      you have classified. Then, you will be presented with ${SESSION_SIZE} randomly selected
+      tweets, one at a time. Do your best to identify
       the emotion expressed in the tweet and click the corresponding button, which records your
       label and shows you the next tweet. If you want to go back and change an earlier label, use
       <b>Previous</b> and <b>Next</b> to move between tweets. Your current selection is highlighted
