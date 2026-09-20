@@ -1,0 +1,182 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tweet Labeling</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 3rem auto;
+         padding: 0 1rem; line-height: 1.5; }
+  .bar { color: #666; font-size: .9rem; margin-bottom: 1rem; }
+  .instructions { color: #555; font-size: .9rem; background: #f4f6f8; border-radius: 6px;
+                  padding: .7rem .9rem; margin-bottom: 1.25rem; }
+  .instructions .title { display: block; font-weight: 600; color: #333; margin-bottom: .25rem; }
+  .tweet { font-size: 1.25rem; border: 1px solid #ddd; border-radius: 8px;
+           padding: 1.25rem; margin-bottom: 1.5rem; background: #fafafa; }
+  button { font-size: 1rem; padding: .6rem 1.1rem; margin: 0 .4rem .5rem 0;
+           border: 1px solid #bbb; border-radius: 6px; background: #fff; cursor: pointer; }
+  button:hover { background: #eee; }
+  button.chosen { background: #1a6c3a; border-color: #1a6c3a; color: #fff; font-weight: 600; }
+  button.chosen:hover { background: #155c31; }
+  button:disabled { color: #aaa; border-color: #ddd; cursor: default; background: #fff; }
+  .hint { color: #666; padding: .6rem 0; margin-bottom: 1rem; }
+  .error { background: #fdecea; border: 1px solid #c0392b; color: #7a1c12;
+           border-radius: 6px; padding: .6rem .9rem; margin-bottom: 1rem; }
+  .nav { margin-top: 1.5rem; border-top: 1px solid #eee; padding-top: 1rem; }
+  input { font-size: 1rem; padding: .5rem; }
+</style>
+</head>
+<body>
+
+<div id="screen"></div>
+
+<script src="tweets.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// Paste the Apps Script web app URL here after deploying it (see DEPLOY.md).
+const ENDPOINT = "https://script.google.com/macros/s/AKfycbz0tQuJgW7QmI1KMPfftfYgh05OmTp8-0z32thUzqLgxuUlXvjumn62ZNWOMq-4Hrf7jw/exec";
+// ---------------------------------------------------------------------------
+
+const LABELS = [
+  [0, "sadness"], [1, "joy"], [2, "love"],
+  [3, "anger"], [4, "fear"], [5, "surprise"],
+];
+
+const INSTRUCTIONS = `Do your best to identify the emotion expressed in the tweet
+  and click the corresponding button, which records your label and shows you the next
+  tweet. If you want to go back and change an earlier label, use <b>Previous</b> and
+  <b>Next</b> to move between tweets. Your current selection is highlighted in green with
+  a check mark. You must have a label selected before moving on to the next tweet.`;
+
+const name_of = id => LABELS.find(l => l[0] === id)[1];
+const esc = s => s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const screen = document.getElementById("screen");
+
+let annotator = "";
+let order = [];       // tweet item_ids, freshly shuffled for each session
+let pos = 0;
+let labels = {};      // item_id -> label_id, for this session
+let error = "";       // set when a save fails
+
+// Send one label change to the Google Sheet. text/plain keeps it a "simple"
+// request, so the browser skips the CORS preflight Apps Script cannot answer.
+function save(action, item_id, label_id) {
+  error = "";
+  return fetch(ENDPOINT, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
+    body: JSON.stringify({
+      action: action,
+      annotator_id: annotator,
+      item_id: item_id,
+      text: TWEETS[item_id],
+      label_id: label_id,
+      label_name: label_id === null ? "" : name_of(label_id),
+    }),
+  }).catch(() => {
+    error = "That answer could not be saved. Check your connection and click the label again.";
+    render();
+  });
+}
+
+function start() {
+  const value = document.getElementById("annotator").value.trim();
+  if (!value) { error = "Please enter an ID."; render(); return; }
+  annotator = value;
+  error = "";
+  labels = {};
+  pos = 0;
+  // Fresh random order every time the interface is used.
+  order = TWEETS.map((_, i) => i);
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [order[i], order[j]] = [order[j], order[i]];
+  }
+  render();
+}
+
+function choose(label_id) {
+  const item_id = order[pos];
+  if (labels[item_id] === label_id) {
+    delete labels[item_id];            // clicking the chosen label removes it
+    save("delete", item_id, null);
+  } else {
+    labels[item_id] = label_id;
+    save("set", item_id, label_id);
+    pos++;                             // labeling advances to the next tweet
+  }
+  render();
+}
+
+function move(step) {
+  if (step > 0 && labels[order[pos]] === undefined) return;  // Next needs a label
+  pos = Math.max(0, Math.min(pos + step, order.length));
+  error = "";
+  render();
+}
+
+function render() {
+  const problem = error ? `<div class="error">${esc(error)}</div>` : "";
+
+  if (!annotator) {
+    screen.innerHTML = `
+      <h1>Tweet Labeling</h1>
+      <p>This is an interface for labeling the Emotion dataset, which involves classifying
+      twitter messages (tweets) into basic emotions: anger, fear, joy, love, sadness, and surprise.</p>
+      <p>First, you will enter an annotator ID. This will be used to track which messages
+      you have classified. Then, you will be presented with the tweets, one at a time. Do your best to identify
+      the emotion expressed in the tweet and click the corresponding button, which records your
+      label and shows you the next tweet. If you want to go back and change an earlier label, use
+      <b>Previous</b> and <b>Next</b> to move between tweets. Your current selection is highlighted
+      in green with a check mark. You must have a label selected before moving on to the next tweet.</p>
+      <p>Enter your annotator ID to begin.</p>
+      ${problem}
+      <input id="annotator" autofocus placeholder="your ID" size="24">
+      <button onclick="start()">Start</button>`;
+    const box = document.getElementById("annotator");
+    box.focus();
+    box.onkeydown = e => { if (e.key === "Enter") start(); };
+    return;
+  }
+
+  if (pos >= order.length) {
+    const labeled = Object.keys(labels).length;
+    screen.innerHTML = `
+      <h1>Task completed</h1>
+      <p>Annotator <b>${esc(annotator)}</b> labeled ${labeled} of ${order.length} tweets.</p>
+      <p>Your answers have been saved. You can close this page.</p>
+      ${problem}
+      <button onclick="move(-1)">&larr; Back to the last tweet</button>`;
+    return;
+  }
+
+  const item_id = order[pos];
+  const current = labels[item_id];
+  const buttons = LABELS.map(([id, label]) =>
+    `<button onclick="choose(${id})" class="${id === current ? "chosen" : ""}">` +
+    `${label}${id === current ? " &check;" : ""}</button>`
+  ).join("\n");
+
+  // The check mark on the chosen button already shows the current label.
+  const banner = current === undefined
+    ? `<div class="hint">Pick a label to continue.</div>`
+    : "";
+
+  screen.innerHTML = `
+    <div class="bar">Annotator <b>${esc(annotator)}</b> &middot;
+      tweet ${pos + 1} of ${order.length}</div>
+    <div class="instructions"><span class="title">Directions</span>${INSTRUCTIONS}</div>
+    <div class="tweet">${esc(TWEETS[item_id])}</div>
+    ${problem}
+    ${banner}
+    ${buttons}
+    <div class="nav">
+      <button onclick="move(-1)" ${pos === 0 ? "disabled" : ""}>&larr; Previous</button>
+      <button onclick="move(1)" ${current === undefined ? "disabled" : ""}>Next &rarr;</button>
+    </div>`;
+}
+
+render();
+</script>
+</body>
+</html>
